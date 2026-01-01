@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-document-reader",
+  "name": "Document Reader",
+  "version": "1.0.0",
+  "minAppVersion": "1.0.0",
+  "description": "Post-processes web-clipped articles: downloads images locally, links author pages, generates tags via Claude API",
+  "author": "Seth",
+  "isDesktopOnly": false
+}

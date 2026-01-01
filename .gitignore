@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+main.js
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Obsidian
+data.json
+
+# Project-specific
+thoughts/
+.claude/
