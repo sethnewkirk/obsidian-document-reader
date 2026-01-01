@@ -12,8 +12,11 @@ export interface DocumentReaderSettings {
     createAuthorPages: boolean;
     generateTags: boolean;
     organizeByCategory: boolean;
+    skipDuplicates: boolean;
+    linkRelatedArticles: boolean;
     tagPrefix: string;
     maxTags: number;
+    maxRelatedArticles: number;
     authorFrontmatterKey: string;
     useClaudeForAuthor: boolean;
 }
@@ -29,8 +32,11 @@ export const DEFAULT_SETTINGS: DocumentReaderSettings = {
     createAuthorPages: true,
     generateTags: true,
     organizeByCategory: true,
+    skipDuplicates: true,
+    linkRelatedArticles: true,
     tagPrefix: 'research/',
     maxTags: 5,
+    maxRelatedArticles: 5,
     authorFrontmatterKey: 'author',
     useClaudeForAuthor: true,
 };
@@ -54,19 +60,15 @@ export class DocumentReaderSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('API Key')
             .setDesc('Your Anthropic API key for Claude')
-            .addText(text => text
-                .setPlaceholder('sk-ant-...')
-                .setValue(this.plugin.settings.claudeApiKey)
-                .inputEl.type = 'password');
-
-        // Need to set up the change handler separately due to type issue
-        const apiKeySetting = containerEl.querySelector('.setting-item:last-child input') as HTMLInputElement;
-        if (apiKeySetting) {
-            apiKeySetting.addEventListener('change', async () => {
-                this.plugin.settings.claudeApiKey = apiKeySetting.value;
-                await this.plugin.saveSettings();
+            .addText(text => {
+                text.setPlaceholder('sk-ant-...')
+                    .setValue(this.plugin.settings.claudeApiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.claudeApiKey = value;
+                        await this.plugin.saveSettings();
+                    });
+                text.inputEl.type = 'password';
             });
-        }
 
         new Setting(containerEl)
             .setName('Claude Model')
@@ -171,6 +173,16 @@ export class DocumentReaderSettingTab extends PluginSettingTab {
                 }));
 
         new Setting(containerEl)
+            .setName('Skip Duplicate URLs')
+            .setDesc('Skip processing if another file already has the same URL in frontmatter')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.skipDuplicates)
+                .onChange(async (value) => {
+                    this.plugin.settings.skipDuplicates = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
             .setName('Use Claude for Author Detection')
             .setDesc('Use Claude to extract author name when not in frontmatter')
             .addToggle(toggle => toggle
@@ -203,6 +215,31 @@ export class DocumentReaderSettingTab extends PluginSettingTab {
                 .setDynamicTooltip()
                 .onChange(async (value) => {
                     this.plugin.settings.maxTags = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        // Related Articles Section
+        containerEl.createEl('h2', { text: 'Related Articles' });
+
+        new Setting(containerEl)
+            .setName('Link Related Articles')
+            .setDesc('Add a "Related Articles" section with links to similar articles based on shared tags and category')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.linkRelatedArticles)
+                .onChange(async (value) => {
+                    this.plugin.settings.linkRelatedArticles = value;
+                    await this.plugin.saveSettings();
+                }));
+
+        new Setting(containerEl)
+            .setName('Maximum Related Articles')
+            .setDesc('Maximum number of related articles to show (1-10)')
+            .addSlider(slider => slider
+                .setLimits(1, 10, 1)
+                .setValue(this.plugin.settings.maxRelatedArticles)
+                .setDynamicTooltip()
+                .onChange(async (value) => {
+                    this.plugin.settings.maxRelatedArticles = value;
                     await this.plugin.saveSettings();
                 }));
 

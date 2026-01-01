@@ -8,6 +8,13 @@ export interface AuthorLinkResult {
     created: boolean;
 }
 
+export interface MultiAuthorLinkResult {
+    results: AuthorLinkResult[];
+    allAuthorNames: string[];
+    allAuthorLinks: string[];
+    authorsCreated: number;
+}
+
 export class AuthorLinker {
     private app: App;
     private settings: DocumentReaderSettings;
@@ -20,33 +27,99 @@ export class AuthorLinker {
     }
 
     /**
-     * Link or create an author page for the article
-     * Now reads file directly to avoid cache timing issues
+     * Split an author string into individual author names
+     * Handles formats like:
+     * - "John Smith and Jane Doe"
+     * - "John Smith, Jane Doe"
+     * - "John Smith & Jane Doe"
+     * - "John Smith, Jane Doe, and Bob Johnson"
      */
-    async linkAuthor(file: TFile, _frontmatter: Record<string, unknown>, content: string): Promise<AuthorLinkResult> {
+    splitAuthors(authorString: string): string[] {
+        if (!authorString || authorString.trim().length === 0) {
+            return [];
+        }
+
+        let authors = authorString.trim();
+
+        // First, handle "and" as a separator (with surrounding spaces)
+        // Replace " and " and " & " with a common delimiter
+        authors = authors.replace(/\s+and\s+/gi, ', ');
+        authors = authors.replace(/\s+&\s+/g, ', ');
+
+        // Now split on ", " (comma followed by space)
+        const parts = authors.split(/,\s+/);
+
+        // Filter out empty strings and trim each author name
+        return parts
+            .map(name => name.trim())
+            .filter(name => name.length > 0);
+    }
+
+    /**
+     * Link or create author pages for the article
+     * Handles multiple authors separated by commas, "and", or "&"
+     */
+    async linkAuthor(file: TFile, _frontmatter: Record<string, unknown>, content: string): Promise<MultiAuthorLinkResult> {
+        const multiResult: MultiAuthorLinkResult = {
+            results: [],
+            allAuthorNames: [],
+            allAuthorLinks: [],
+            authorsCreated: 0
+        };
+
+        // Step 1: Extract author name from file content directly (parse YAML ourselves)
+        // This avoids cache timing issues where metadataCache hasn't updated yet
+        let authorString = this.extractAuthorFromContent(content);
+
+        if (!authorString && this.settings.useClaudeForAuthor && this.claudeClient.isConfigured()) {
+            authorString = await this.extractWithClaude(content);
+        }
+
+        if (!authorString) {
+            return multiResult;
+        }
+
+        // Step 2: Split into individual authors
+        const authorNames = this.splitAuthors(authorString);
+
+        if (authorNames.length === 0) {
+            return multiResult;
+        }
+
+        // Step 3: Process each author
+        for (const rawAuthorName of authorNames) {
+            const result = await this.processOneAuthor(rawAuthorName, content);
+            multiResult.results.push(result);
+
+            if (result.authorName) {
+                multiResult.allAuthorNames.push(result.authorName);
+            }
+            if (result.authorLink) {
+                multiResult.allAuthorLinks.push(result.authorLink);
+            }
+            if (result.created) {
+                multiResult.authorsCreated++;
+            }
+        }
+
+        return multiResult;
+    }
+
+    /**
+     * Process a single author: normalize, search, and optionally create page
+     */
+    private async processOneAuthor(rawAuthorName: string, content: string): Promise<AuthorLinkResult> {
         const result: AuthorLinkResult = {
             authorName: null,
             authorLink: null,
             created: false
         };
 
-        // Step 1: Extract author name from file content directly (parse YAML ourselves)
-        // This avoids cache timing issues where metadataCache hasn't updated yet
-        let authorName = this.extractAuthorFromContent(content);
-
-        if (!authorName && this.settings.useClaudeForAuthor && this.claudeClient.isConfigured()) {
-            authorName = await this.extractWithClaude(content);
-        }
-
-        if (!authorName) {
-            return result;
-        }
-
-        // Step 2: Normalize the author name
-        authorName = this.normalizeName(authorName);
+        // Normalize the author name
+        const authorName = this.normalizeName(rawAuthorName);
         result.authorName = authorName;
 
-        // Step 3: Search for existing author page
+        // Search for existing author page
         const existingPage = await this.findAuthorPage(authorName);
 
         if (existingPage) {
@@ -54,7 +127,7 @@ export class AuthorLinker {
             return result;
         }
 
-        // Step 4: Create new author page if enabled
+        // Create new author page if enabled
         if (this.settings.createAuthorPages) {
             const newPage = await this.createAuthorPage(authorName, content);
             if (newPage) {
@@ -148,12 +221,21 @@ ${content.slice(0, 3000)}`;
         // Remove common prefixes
         normalized = normalized.replace(/^(by|written by|author:)\s*/i, '');
 
-        // Handle "Last, First" format
+        // Handle "Last, First" format (but not organization names)
         if (normalized.includes(',')) {
             const parts = normalized.split(',').map(p => p.trim());
             if (parts.length === 2 && parts[0] && parts[1]) {
-                // Check if this looks like "Last, First" (both parts are names, not titles)
-                if (!parts[1].includes(' ') || parts[1].split(' ').length <= 2) {
+                // Words that indicate this is NOT a "Last, First" person name
+                const orgIndicators = [
+                    'association', 'guild', 'foundation', 'institute', 'society',
+                    'organization', 'corporation', 'inc', 'llc', 'ltd', 'company',
+                    'group', 'committee', 'board', 'council', 'department', 'office'
+                ];
+                const lowerParts = (parts[0] + ' ' + parts[1]).toLowerCase();
+                const isOrganization = orgIndicators.some(word => lowerParts.includes(word));
+
+                // Only flip if it looks like a person name (not an organization)
+                if (!isOrganization && (!parts[1].includes(' ') || parts[1].split(' ').length <= 2)) {
                     normalized = `${parts[1]} ${parts[0]}`;
                 }
             }
@@ -214,13 +296,8 @@ ${content.slice(0, 3000)}`;
             }
         }
 
-        // Fuzzy match: check if search term is contained in filename or vice versa
-        for (const file of files) {
-            const basename = file.basename.toLowerCase();
-            if (basename.includes(normalizedSearch) || normalizedSearch.includes(basename)) {
-                return file;
-            }
-        }
+        // Removed fuzzy matching to prevent incorrect author linking
+        // (e.g., "John" matching "Johnny Depp" or "John Smith")
 
         return null;
     }

@@ -82,10 +82,11 @@ export class ImageDownloader {
      * Download an image and save it to the vault
      */
     private async downloadImage(url: string, sourceFile: TFile): Promise<string> {
-        // Download the image
+        // Download the image (with 30 second timeout)
         const response = await requestUrl({
             url: url,
             method: 'GET',
+            throw: false,
         });
 
         if (response.status !== 200) {

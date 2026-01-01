@@ -4,6 +4,7 @@ import { ClaudeApiClient } from './ClaudeApiClient';
 export interface TagGenerationResult {
     tags: string[];
     category: string | null;
+    publishedDate: string | null;
 }
 
 export class TagGenerator {
@@ -20,7 +21,7 @@ export class TagGenerator {
      */
     async generateTags(content: string, frontmatter: Record<string, unknown>): Promise<TagGenerationResult> {
         if (!this.claudeClient.isConfigured()) {
-            return { tags: [], category: null };
+            return { tags: [], category: null, publishedDate: null };
         }
 
         // Get existing tags from frontmatter to avoid duplicates
@@ -33,7 +34,7 @@ export class TagGenerator {
             return this.parseResponse(response);
         } catch (error) {
             console.error('Failed to generate tags with Claude:', error);
-            return { tags: [], category: null };
+            return { tags: [], category: null, publishedDate: null };
         }
     }
 
@@ -52,6 +53,7 @@ export class TagGenerator {
         return `Analyze this article and:
 1. Generate ${maxTags} hierarchical tags for categorization
 2. Determine the PRIMARY category for filing
+3. Extract the PUBLICATION DATE if mentioned
 
 For tags:
 - Use hierarchical format with "/" separators (e.g., "economics/trade-policy", "technology/ai/machine-learning")
@@ -68,8 +70,14 @@ For the category:
 - Choose the single most appropriate subject area
 - Prefer broader categories (e.g., "Technology" over "Machine Learning")
 
+For the publication date:
+- Look for: bylines, date stamps, "Published:", "Posted:", article metadata, etc.
+- Format as YYYY-MM-DD if found
+- Use "unknown" if no publication date can be determined
+
 Respond in this exact format:
 CATEGORY: [category name]
+PUBLISHED: [YYYY-MM-DD or "unknown"]
 TAGS:
 - tag1
 - tag2
@@ -84,16 +92,37 @@ ${content.slice(0, 4000)}`;
     private parseResponse(response: string): TagGenerationResult {
         const result: TagGenerationResult = {
             tags: [],
-            category: null
+            category: null,
+            publishedDate: null
         };
 
         // Extract category
         const categoryMatch = response.match(/^CATEGORY:\s*(.+)$/m);
         if (categoryMatch && categoryMatch[1]) {
             const category = categoryMatch[1].trim();
-            // Validate category (Title Case, no weird characters)
-            if (category.length > 0 && category.length <= 50 && /^[A-Za-z\s&-]+$/.test(category)) {
+            // Validate category (Title Case, allows letters, numbers, spaces, &, ', -)
+            if (category.length > 0 && category.length <= 50 && /^[A-Za-z0-9\s&'\-]+$/.test(category)) {
                 result.category = category;
+            }
+        }
+
+        // Extract published date
+        const publishedMatch = response.match(/^PUBLISHED:\s*(.+)$/m);
+        if (publishedMatch && publishedMatch[1]) {
+            const publishedValue = publishedMatch[1].trim().toLowerCase();
+            // Check if it's not "unknown" and validate YYYY-MM-DD format
+            if (publishedValue !== 'unknown') {
+                const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+                if (datePattern.test(publishedValue)) {
+                    // Additional validation: check if it's a valid date
+                    const [year, month, day] = publishedValue.split('-').map(Number);
+                    const date = new Date(year, month - 1, day);
+                    if (date.getFullYear() === year &&
+                        date.getMonth() === month - 1 &&
+                        date.getDate() === day) {
+                        result.publishedDate = publishedValue;
+                    }
+                }
             }
         }
 

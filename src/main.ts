@@ -40,7 +40,7 @@ export default class DocumentReaderPlugin extends Plugin {
 
         // Register rename event to catch files moved into articles folder
         this.registerEvent(
-            this.app.vault.on('rename', (file, oldPath) => {
+            this.app.vault.on('rename', (file, _oldPath) => {
                 if (file instanceof TFile && this.settings.autoProcess) {
                     this.debouncedProcess(file);
                 }
